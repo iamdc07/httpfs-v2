@@ -10,18 +10,20 @@ import java.nio.ByteOrder;
 import java.nio.channels.*;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.Scanner;
-import java.util.Set;
+import java.util.*;
 
 import static java.nio.channels.SelectionKey.OP_READ;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class Server {
+//    static long currentSequence = 0L;
     public static void main(String[] args) throws IOException {
-
         Scanner scanner = new Scanner(System.in);
+        List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
+        Set<Long> sequenceNumbers = new HashSet<>();
+        Packet finalPacket = null;
+        boolean flag = true;
+
 
         SocketChannel socketChannel = null;
         try {
@@ -40,10 +42,12 @@ public class Server {
 
                         channel.configureBlocking(false);
                         Selector selector = Selector.open();
+
+
                         // TO-DO Handle multiple packets by multiple clients
                         while (true) {
                             SocketAddress router = null;
-                            ArrayList<Packet> packetList = new ArrayList<>();
+//                            ArrayList<Packet> responsePackets = new ArrayList<>();
 
                             // Receive a packet within the timeout
                             channel.register(selector, OP_READ);
@@ -63,13 +67,49 @@ public class Server {
 
                                 buf.flip();
 
+                                Packet responsePacket;
+
                                 if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
                                     break;
 
-                                Packet responsePacket = Packet.fromBuffer(buf);
+                                responsePacket = Packet.fromBuffer(buf);
                                 buf.clear();
-                                packetList.add(responsePacket);
-                                System.out.println("Received Arraylist Size:" + packetList.size());
+
+                                System.out.println("PACKET SEQ:" + responsePacket.getSequenceNumber());
+
+                                // Add Client request packets
+                                if (!sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
+                                    System.out.println("Adding this packet");
+
+                                    // Send ACK for the received packet
+                                    Packet packet = responsePacket.toBuilder()
+                                            .setType(2)
+                                            .setPayload(new byte[0])
+                                            .create();
+
+                                    channel.send(packet.toBuffer(),router);
+//                                    modifyCurrentSequence(true);
+
+//                                    System.out.println("Current Sequence Pointer:" + currentSequence);
+
+                                    String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
+
+                                    if (responsePayload.equalsIgnoreCase("\r\n"))
+                                        finalPacket = responsePacket;
+                                    else {
+                                        // Add packet to buffer
+                                        receivedPackets.add(responsePacket);
+                                        sequenceNumbers.add(responsePacket.getSequenceNumber());
+                                    }
+                                }
+
+                                if (finalPacket != null && receivedPackets.size() == (finalPacket.getSequenceNumber() - 1)) {
+//                                    flag = false;
+                                    break;
+                                }
+
+//                                responsePackets.add(responsePacket);
+                                System.out.println("Received Arraylist Size:" + receivedPackets.size());
 //                                System.out.println("Length:" + buf.limit());
 //                                }
 //                                // Wait for response
@@ -83,13 +123,27 @@ public class Server {
 //                                }
                             }
 
+                            // Reorder packets
+                            synchronized (receivedPackets) {
+                                Collections.sort(receivedPackets, new Comparator<>() {
+                                    @Override
+                                    public int compare(Packet o1, Packet o2) {
+                                        return Long.compare(o1.getSequenceNumber(), o2.getSequenceNumber());
+                                    }
+                                });
+                            }
+
 //                            String response = "";
 
-                            ArrayList<Packet> copy = new ArrayList<>(packetList);
+                            ArrayList<Packet> copy = new ArrayList<>(receivedPackets);
                             Serve serve = new Serve(router, copy);
                             serve.start();
-//                            serve.join();
-                            packetList.clear();
+                            serve.join();
+//                            responsePackets.clear();
+                            receivedPackets.clear();
+                            sequenceNumbers.clear();
+//                            flag = true;
+                            finalPacket = null;
                             buf.clear();
                         }
                     } catch (IOException ex) {
@@ -114,6 +168,13 @@ public class Server {
             ex.printStackTrace();
         }
     }
+
+//    protected static long modifyCurrentSequence(boolean modify) {
+//        if (modify)
+//            currentSequence++;
+//
+//        return currentSequence;
+//    }
 
     private static void validate(String input) {
         String[] words = input.split(" ");

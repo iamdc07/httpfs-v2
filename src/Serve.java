@@ -12,6 +12,9 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ArrayBlockingQueue;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -26,6 +29,9 @@ public class Serve extends Thread {
 
     @Override
     public void run() {
+        ArrayList<TimerTask> tasks = new ArrayList<>();
+        ArrayBlockingQueue<Packet> ackBuffer = new ArrayBlockingQueue<>(99);
+
         try (DatagramChannel channel = DatagramChannel.open()) {
             if (Config.isVerbose)
                 System.out.println("Thread forked!");
@@ -38,9 +44,10 @@ public class Serve extends Thread {
 //            System.out.println("Limit:" + buf.limit());
 
             String response = "";
+            int start = 0;
 
             for (Packet each : packetsReceived) {
-                System.out.println("Received Packet " + each.getSequenceNumber());
+                System.out.println("Received Packet SEQ: " + each.getSequenceNumber());
                 String responsePayload = new String(each.getPayload(), StandardCharsets.UTF_8);
                 response = response.concat(responsePayload.trim());
             }
@@ -55,22 +62,63 @@ public class Serve extends Thread {
 
             System.out.println("Peer port:" + packetsReceived.get(0).getPeerPort());
 
-//                            logger.info("Packet: {}", packet);
-//                            logger.info("Payload: {}", payload);
-//                            logger.info("Router: {}", router);
+            boolean flag = true;
 
-            // Send the response to the router not the client.
-            // The peer address of the packet is the address of the client already.
-            // We can use toBuilder to copy properties of the current packet.
-            // This demonstrate how to create a new packet from an existing packet.
-//            Packet responsePacket = packet.toBuilder()
-//                    .setPayload(serverParameters.response.getBytes())
-//                    .create();
+            Timer timer = new Timer(true);
 
-            for (Packet each : packetList) {
-                channel.send(each.toBuffer(), socketAddress);
-                System.out.println("Packet Sent as Response");
+            // Send Packets
+            while (flag) {
+                flag = sendPackets(packetList, channel, socketAddress, start, timer, tasks);
+
+                int k = 0;
+
+                // Create Buffer for Response
+                ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+
+                // Receive each Ack one by one
+                while (k < 5) {
+                    channel.receive(buf);
+                    buf.flip();
+
+                    Packet ackPacket = Packet.fromBuffer(buf);
+                    buf.clear();
+
+                    if (!ackBuffer.contains(ackPacket)) {
+                        ackBuffer.add(ackPacket);
+
+                        System.out.println("ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
+
+                        if (tasks.size() >= ackBuffer.size()) {
+                            TimerTask timerTask = tasks.get((int) ackPacket.getSequenceNumber() - 1);
+                            timerTask.cancel();
+                            System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber() - 1));
+                        }
+                    }
+
+                    if (ackBuffer.size() == tasks.size()) {
+                        break;
+                    }
+                    System.out.println("Received Ack List Size:" + ackBuffer.size());
+                    k++;
+                }
+
+                start += 5;
             }
+
+            timer.cancel();
+
+//            for (Packet each : packetList) {
+//                channel.send(each.toBuffer(), socketAddress);
+//                System.out.println("Packet Sent as Response");
+//            }
+
+//            Packet packet = packetList.get(packetList.size() - 1)
+//                    .toBuilder()
+//                    .setPayload(new byte[0])
+//                    .setType(0).create();
+
+//            channel.send(packet.toBuffer(), socketAddress);
+//            System.out.println("FINAL Packet Sent as Response");
 
 //            buf.clear();
             packetList.clear();
@@ -112,12 +160,12 @@ public class Serve extends Thread {
 //        String payload = httpRequest.processRequest(serverParameters);
         httpRequest.processRequest(new StringBuilder(payload), serverParameters);
         byte[] buffer = serverParameters.response.getBytes();
-        long seq = 1L;
         int i = 0;
+        long seq = 1L;
+        byte[] bytes;
+        bytes = "\r\n".getBytes();
 
-//        for (int i = 0; i < buffer.length; i = i + 1013)
         while (i < buffer.length){
-//            byte[] bytes = payload.getBytes(i, i + 1012);
             System.out.println("I:" + i + " I + 1012:" + (i + 1012) + " buffer Length:" + buffer.length);
             byte[] slice;
             if (i + 1012 > buffer.length) {
@@ -138,6 +186,14 @@ public class Serve extends Thread {
             i += 1013;
         }
 
+        Packet lastPacket = packet.toBuilder()
+                .setSequenceNumber(seq)
+                .setType(0)
+                .setPayload(bytes)
+                .create();
+
+        packetList.add(lastPacket);
+
 //        i -= 1012;
 //
 //        if ((buffer.length - i) > 0) {
@@ -153,5 +209,27 @@ public class Serve extends Thread {
 //        }
 
         return packetList;
+    }
+
+    private static boolean sendPackets(ArrayList<Packet> packetList, DatagramChannel channel, SocketAddress routerAddress, int start, Timer timer, ArrayList<TimerTask> tasks) throws IOException {
+        for (int i = start; i < start + 5; i++) {
+            System.out.println("Packets Sent as Response: " + (i + 1));
+
+            if (i == packetList.size() - 1) {
+                channel.send(packetList.get(i).toBuffer(), routerAddress);
+                TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
+                tasks.add(task);
+                timer.schedule(task, 5000, 5000);
+                return false;
+            }
+
+            channel.send(packetList.get(i).toBuffer(), routerAddress);
+            TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
+            tasks.add(task);
+            timer.schedule(task, 5000, 5000);
+        }
+
+
+        return true;
     }
 }
