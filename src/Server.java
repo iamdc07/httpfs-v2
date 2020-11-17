@@ -16,11 +16,13 @@ import static java.nio.channels.SelectionKey.OP_READ;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class Server {
-//    static long currentSequence = 0L;
+    static long currentSequence = 0L;
+    static Set<Long> sequenceNumbers = new HashSet<>();
+    static int start = 1;
     public static void main(String[] args) throws IOException {
         Scanner scanner = new Scanner(System.in);
         List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
-        Set<Long> sequenceNumbers = new HashSet<>();
+//        Set<Long> sequenceNumbers = new HashSet<>();
         Packet finalPacket = null;
         boolean flag = true;
 
@@ -58,7 +60,7 @@ public class Server {
                             Iterator<SelectionKey> iterator = keys.iterator();
                             SelectionKey key = iterator.next();
 
-                            while (key.isReadable()) {
+                            while (finalPacket == null) {
 //                                if (selectionKey.isReadable()) {
                                 if (router == null)
                                     router = channel.receive(buf);
@@ -77,10 +79,16 @@ public class Server {
 
                                 System.out.println("PACKET SEQ:" + responsePacket.getSequenceNumber());
 
+                                if (!(responsePacket.getSequenceNumber() >= start - 1  && responsePacket.getSequenceNumber() <= start + 4)) {
+                                    continue;
+                                }
+
                                 // Add Client request packets
                                 if (!sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
                                     System.out.println("Adding this packet");
 
+
+                                    // TO-DO Add ack resend - Drop and delay
                                     // Send ACK for the received packet
                                     Packet packet = responsePacket.toBuilder()
                                             .setType(2)
@@ -88,9 +96,8 @@ public class Server {
                                             .create();
 
                                     channel.send(packet.toBuffer(),router);
-//                                    modifyCurrentSequence(true);
-
-//                                    System.out.println("Current Sequence Pointer:" + currentSequence);
+                                    modifyCurrentSequence(true);
+                                    System.out.println("Current Sequence Pointer:" + currentSequence);
 
                                     String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
 
@@ -99,11 +106,13 @@ public class Server {
                                     else {
                                         // Add packet to buffer
                                         receivedPackets.add(responsePacket);
-                                        sequenceNumbers.add(responsePacket.getSequenceNumber());
                                     }
+                                    sequenceNumbers.add(responsePacket.getSequenceNumber());
                                 }
 
-                                if (finalPacket != null && receivedPackets.size() == (finalPacket.getSequenceNumber() - 1)) {
+                                Server.start = (int) currentSequence;
+
+                                if (finalPacket != null && sequenceNumbers.size() == (finalPacket.getSequenceNumber())) {
 //                                    flag = false;
                                     break;
                                 }
@@ -135,13 +144,16 @@ public class Server {
 
 //                            String response = "";
 
+                            if (receivedPackets.size() == 0)
+                                continue;
+
                             ArrayList<Packet> copy = new ArrayList<>(receivedPackets);
                             Serve serve = new Serve(router, copy);
                             serve.start();
                             serve.join();
 //                            responsePackets.clear();
                             receivedPackets.clear();
-                            sequenceNumbers.clear();
+//                            sequenceNumbers.clear();
 //                            flag = true;
                             finalPacket = null;
                             buf.clear();
@@ -169,12 +181,12 @@ public class Server {
         }
     }
 
-//    protected static long modifyCurrentSequence(boolean modify) {
-//        if (modify)
-//            currentSequence++;
-//
-//        return currentSequence;
-//    }
+    protected static long modifyCurrentSequence(boolean modify) {
+        if (modify)
+            currentSequence++;
+
+        return currentSequence;
+    }
 
     private static void validate(String input) {
         String[] words = input.split(" ");

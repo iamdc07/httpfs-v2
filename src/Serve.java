@@ -10,10 +10,7 @@ import java.nio.channels.DatagramChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -29,7 +26,8 @@ public class Serve extends Thread {
 
     @Override
     public void run() {
-        ArrayList<TimerTask> tasks = new ArrayList<>();
+//        ArrayList<TimerTask> tasks = new ArrayList<>();
+        HashMap<Long, TimerTask> tasksMap = new HashMap<>();
         ArrayBlockingQueue<Packet> ackBuffer = new ArrayBlockingQueue<>(99);
 
         try (DatagramChannel channel = DatagramChannel.open()) {
@@ -44,7 +42,7 @@ public class Serve extends Thread {
 //            System.out.println("Limit:" + buf.limit());
 
             String response = "";
-            int start = 0;
+//            int start = 0;
 
             for (Packet each : packetsReceived) {
                 System.out.println("Received Packet SEQ: " + each.getSequenceNumber());
@@ -58,7 +56,7 @@ public class Serve extends Thread {
 
             ServerParameters serverParameters = new ServerParameters();
 
-            ArrayList<Packet> packetList = generatePackets(httpRequest, serverParameters, packetsReceived.get(0), response);
+            HashMap<Long, Packet> packetList = generatePackets(httpRequest, serverParameters, packetsReceived.get(0), response);
 
             System.out.println("Peer port:" + packetsReceived.get(0).getPeerPort());
 
@@ -68,7 +66,7 @@ public class Serve extends Thread {
 
             // Send Packets
             while (flag) {
-                flag = sendPackets(packetList, channel, socketAddress, start, timer, tasks);
+                flag = sendPackets(packetList, channel, socketAddress, timer, tasksMap);
 
                 int k = 0;
 
@@ -88,21 +86,23 @@ public class Serve extends Thread {
 
                         System.out.println("ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
 
-                        if (tasks.size() >= ackBuffer.size()) {
-                            TimerTask timerTask = tasks.get((int) ackPacket.getSequenceNumber() - 1);
+                        if (tasksMap.containsKey(ackPacket.getSequenceNumber())) {
+                            TimerTask timerTask = tasksMap.get(ackPacket.getSequenceNumber());
                             timerTask.cancel();
-                            System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber() - 1));
+                            tasksMap.remove(ackPacket.getSequenceNumber());
+                            System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber()));
                         }
                     }
 
-                    if (ackBuffer.size() == tasks.size()) {
+                    if (tasksMap.size() == 0) {
                         break;
                     }
                     System.out.println("Received Ack List Size:" + ackBuffer.size());
                     k++;
                 }
 
-                start += 5;
+//                start += 5;
+//                start += Server.modifyCurrentSequence(false);
             }
 
             timer.cancel();
@@ -155,16 +155,16 @@ public class Serve extends Thread {
         }
     }
 
-    private static ArrayList<Packet> generatePackets(HttpRequest httpRequest, ServerParameters serverParameters, Packet packet, String payload) {
-        ArrayList<Packet> packetList = new ArrayList<>();
+    private static HashMap<Long, Packet> generatePackets(HttpRequest httpRequest, ServerParameters serverParameters, Packet packet, String payload) {
+//        ArrayList<Packet> packetList = new ArrayList<>();
+        HashMap<Long, Packet> packetList = new HashMap<>();
 //        String payload = httpRequest.processRequest(serverParameters);
         httpRequest.processRequest(new StringBuilder(payload), serverParameters);
         byte[] buffer = serverParameters.response.getBytes();
         int i = 0;
-        long seq = 1L;
+//        long seq = 1L;
         byte[] bytes;
         bytes = "\r\n".getBytes();
-
         while (i < buffer.length){
             System.out.println("I:" + i + " I + 1012:" + (i + 1012) + " buffer Length:" + buffer.length);
             byte[] slice;
@@ -177,22 +177,24 @@ public class Serve extends Thread {
             System.out.println("SLICE length:" + slice.length);
 
             Packet responsePacket = packet.toBuilder()
-                    .setSequenceNumber(seq)
+                    .setSequenceNumber(Server.modifyCurrentSequence(true))
                     .setPayload(slice)
                     .create();
 
-            packetList.add(responsePacket);
-            seq++;
+            packetList.put(Server.modifyCurrentSequence(false), responsePacket);
+//            seq++;
+            Server.sequenceNumbers.add(Server.currentSequence);
             i += 1013;
         }
 
         Packet lastPacket = packet.toBuilder()
-                .setSequenceNumber(seq)
+                .setSequenceNumber(Server.modifyCurrentSequence(true))
                 .setType(0)
                 .setPayload(bytes)
                 .create();
 
-        packetList.add(lastPacket);
+        packetList.put(Server.modifyCurrentSequence(false), lastPacket);
+        Server.sequenceNumbers.add(Server.currentSequence);
 
 //        i -= 1012;
 //
@@ -211,22 +213,29 @@ public class Serve extends Thread {
         return packetList;
     }
 
-    private static boolean sendPackets(ArrayList<Packet> packetList, DatagramChannel channel, SocketAddress routerAddress, int start, Timer timer, ArrayList<TimerTask> tasks) throws IOException {
-        for (int i = start; i < start + 5; i++) {
-            System.out.println("Packets Sent as Response: " + (i + 1));
+    private static boolean sendPackets(HashMap<Long, Packet> packetList, DatagramChannel channel, SocketAddress routerAddress, Timer timer, HashMap<Long, TimerTask> tasksMap) throws IOException {
+        ++Server.start;
+        System.out.println("Start:" + Server.start);
+        System.out.println("Current Sequence:" + Server.currentSequence);
+        for (int i = Server.start; i < Server.start + 5; i++) {
+            System.out.println("Packets Sent as Response: " + (Server.modifyCurrentSequence(false)));
 
-            if (i == packetList.size() - 1) {
-                channel.send(packetList.get(i).toBuffer(), routerAddress);
-                TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
-                tasks.add(task);
+            if (packetList.size() == 1) {
+                channel.send(packetList.get((long) i).toBuffer(), routerAddress);
+                TimerTask task = new PacketTimeout(packetList.get((long) i), channel, routerAddress);
+                tasksMap.put((long) i, task);
                 timer.schedule(task, 5000, 5000);
+                packetList.remove((long) i);
+                Server.start++;
                 return false;
             }
 
-            channel.send(packetList.get(i).toBuffer(), routerAddress);
-            TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
-            tasks.add(task);
+            channel.send(packetList.get((long) i).toBuffer(), routerAddress);
+            TimerTask task = new PacketTimeout(packetList.get((long) i), channel, routerAddress);
+            tasksMap.put((long) i, task);
             timer.schedule(task, 5000, 5000);
+            packetList.remove((long) i);
+            Server.start++;
         }
 
 
