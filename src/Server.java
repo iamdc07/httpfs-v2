@@ -36,6 +36,9 @@ public class Server {
                 String command  = "httpfs -v -d ../../../files";
                 validate(command);
 
+                Packet packet = connect();
+                receivedPackets.add(packet);
+
                 if (Config.isValid) {
                     try (DatagramChannel channel = DatagramChannel.open()) {
                         InetSocketAddress socketAddress = new InetSocketAddress(Config.port);
@@ -228,6 +231,72 @@ public class Server {
 
         channel.send(packet.toBuffer(), routerAddress);
         System.out.println("Sending ACK for packet: " + packet.getSequenceNumber());
+    }
+
+    private static Packet connect() {
+        try (DatagramChannel channel = DatagramChannel.open()) {
+            InetSocketAddress socketAddress = new InetSocketAddress(Config.port);
+            channel.bind(socketAddress);
+            SocketAddress routerAddress = null;
+
+            channel.configureBlocking(false);
+            Selector selector = Selector.open();
+            channel.register(selector, OP_READ);
+
+            Set<SelectionKey> keys = selector.selectedKeys();
+            System.out.println("Selector Keys Size:" + keys.size());
+
+//            Packet packet = new Packet.Builder()
+//                    .setType(1)
+//                    .setSequenceNumber(currentSequence)
+//                    .create();
+
+            boolean flag = true;
+
+            while (flag) {
+                // Create Buffer for Response
+                ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+
+                selector.select(3000);
+                Set<SelectionKey> selectedKeys = selector.selectedKeys();
+                Iterator<SelectionKey> iter = selectedKeys.iterator();
+//                SelectionKey key = iter.next();
+
+                // Receive Response
+                routerAddress = channel.receive(buf);
+                buf.flip();
+
+                if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+                    continue;
+
+                Packet receivedPacket = Packet.fromBuffer(buf);
+                buf.clear();
+
+                if (receivedPacket.getType() == 0) {
+                    sequenceNumbers.add(receivedPacket.getSequenceNumber());
+                    modifyCurrentSequence(true);
+                    sendAck(receivedPacket, channel, routerAddress);
+                    selector.close();
+                    channel.socket().close();
+//                    key.cancel();
+                    channel.close();
+                    return receivedPacket;
+                } else if (receivedPacket.getType() == 1 && !sequenceNumbers.contains(receivedPacket.getSequenceNumber())) {
+                    sequenceNumbers.add(receivedPacket.getSequenceNumber());
+                    modifyCurrentSequence(true);
+                }
+
+                Packet responsePacket = receivedPacket.toBuilder()
+                        .setSequenceNumber(currentSequence)
+                        .create();
+
+                channel.send(responsePacket.toBuffer(), routerAddress);
+                System.out.println("Handshake completed");
+            }
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        return null;
     }
 
     private static void validate(String input) {
