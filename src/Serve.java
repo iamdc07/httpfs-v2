@@ -18,10 +18,13 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class Serve extends Thread {
     SocketAddress socketAddress;
     ArrayList<Packet> packetsReceived;
+    ChannelHelper channelHelper;
+    int i = 0;
 
-    public Serve(SocketAddress socketAddress, ArrayList<Packet> packetsReceived) {
+    public Serve(SocketAddress socketAddress, ArrayList<Packet> packetsReceived, ChannelHelper channelHelper) {
         this.socketAddress = socketAddress;
         this.packetsReceived = packetsReceived;
+        this.channelHelper = channelHelper;
     }
 
     @Override
@@ -64,6 +67,8 @@ public class Serve extends Thread {
 
             Timer timer = new Timer(true);
 
+            channelHelper.join();
+
             // Send Packets
             while (flag) {
                 flag = sendPackets(packetList, channel, socketAddress, timer, tasksMap);
@@ -74,14 +79,22 @@ public class Serve extends Thread {
                 ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
 
                 // Receive each Ack one by one
-                while (k < 5) {
+                while (tasksMap.size() != 0) {
                     channel.receive(buf);
                     buf.flip();
 
                     Packet ackPacket = Packet.fromBuffer(buf);
                     buf.clear();
 
-                    if (!ackBuffer.contains(ackPacket)) {
+//                    if (ackPacket.getType() == 1) {
+//                        if (!Server.closingPackets.contains(ackPacket.getSequenceNumber())) {
+//                            Server.closingPackets.add(ackPacket.getSequenceNumber());
+//                            break;
+//                        } else
+//                            continue;
+//                    }
+
+                    if (!ackBuffer.contains(ackPacket) && ackPacket.getType() == 2) {
                         ackBuffer.add(ackPacket);
 
                         System.out.println("ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
@@ -94,16 +107,32 @@ public class Serve extends Thread {
                         }
                     }
 
-                    if (tasksMap.size() == 0) {
-                        break;
-                    }
+//                    if (tasksMap.size() == 0) {
+//                        break;
+//                    }
                     System.out.println("Received Ack List Size:" + ackBuffer.size());
-                    k++;
                 }
 
 //                start += 5;
 //                start += Server.modifyCurrentSequence(false);
             }
+
+//            if (!Server.closingPackets.contains(Server.currentSequence)) {
+//                // Closing the connection
+//                Packet closingPacket = packetsReceived.get(0).toBuilder()
+//                        .setType(1)
+//                        .setSequenceNumber(Server.currentSequence)
+//                        .setPayload(new byte[200]).create();
+//
+//                int j = 1;
+//
+//                while (j < 5) {
+//                    channel.send(closingPacket.toBuffer(), socketAddress);
+//                    j++;
+//                }
+//
+//                Server.closingPackets.add(Server.currentSequence);
+//            }
 
             timer.cancel();
 
@@ -150,7 +179,7 @@ public class Serve extends Thread {
 //            socketChannel.close();
             if (Config.isVerbose)
                 System.out.println("Response sent!\n");
-        } catch (IOException ex) {
+        } catch (IOException | InterruptedException ex) {
             ex.printStackTrace();
         }
     }
@@ -165,7 +194,7 @@ public class Serve extends Thread {
 //        long seq = 1L;
         byte[] bytes;
         bytes = "\r\n".getBytes();
-        while (i < buffer.length){
+        while (i < buffer.length) {
             System.out.println("I:" + i + " I + 1012:" + (i + 1012) + " buffer Length:" + buffer.length);
             byte[] slice;
             if (i + 1012 > buffer.length) {
