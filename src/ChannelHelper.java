@@ -27,16 +27,11 @@ public class ChannelHelper extends Thread {
     @Override
     public void run() {
         try {
-//            channel.socket().setReuseAddress(true);
-//            channel.bind(socketAddress);
             channel.configureBlocking(false);
             Selector selector = Selector.open();
             SelectionKey key1 = channel.register(selector, OP_READ);
 
             Set<SelectionKey> keys = selector.selectedKeys();
-            System.out.println("Selector Keys Size:" + keys.size());
-
-//            SelectionKey key = iterator.next();
 
             while (i < 5) {
                 selector.select(5000);
@@ -74,51 +69,6 @@ public class ChannelHelper extends Thread {
 
             keys.clear();
             key1.cancel();
-
-//            while (true) {
-//                // Create Buffer for Response
-//                ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
-//
-//                keys = selector.selectedKeys();
-//                if (keys.isEmpty()) {
-//                    System.out.println("No response after timeout");
-//                    break;
-//                }
-//
-//                System.out.println("IN CHANNEL HELPER ");
-//                channel.receive(buf);
-//                buf.flip();
-//
-//                if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN) {
-//                    System.out.println("BUF LIMIT AND SEQ: " + buf.limit() + " ");
-//                    buf.clear();
-//                    continue;
-//                }
-//
-//                Packet packet = Packet.fromBuffer(buf);
-//                System.out.println("BUF LIMIT AND SEQ: " + buf.limit() + " ");
-//
-//                Packet ackPacket = packet.toBuilder()
-//                        .setType(2)
-//                        .setPayload(new byte[0])
-//                        .create();
-//
-//                System.out.println("ACKED PACKET:" + ackPacket.getSequenceNumber());
-//
-//                channel.send(ackPacket.toBuffer(), routerAddress);
-//
-//                // Wait for response
-//                selector.select(5000);
-////
-////                Set<SelectionKey> keys = selector.selectedKeys();
-////                System.out.println("Selector Keys Size:" + keys.size());
-//
-////                this.wait(2000);
-//
-//
-//
-////                i++;
-//            }
         } catch (IOException ex) {
             ex.printStackTrace();
         }

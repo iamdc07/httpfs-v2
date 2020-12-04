@@ -18,13 +18,11 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class Server {
     static long currentSequence = 0L;
     static Set<Long> sequenceNumbers = new HashSet<>();
-    static Set<Long> closingPackets = new HashSet<>();
     static int start = 1;
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
-//        Set<Long> sequenceNumbers = new HashSet<>();
         Packet finalPacket = null;
         boolean flag = true;
 
@@ -49,27 +47,8 @@ public class Server {
                                 .order(ByteOrder.BIG_ENDIAN);
                         buf.clear();
 
-//                        channel.configureBlocking(false);
-//                        Selector selector = Selector.open();
-
-//                        DatagramChannel channel1 = DatagramChannel.open();
-//                        channel1.socket().setReuseAddress(true);
-//                        channel1.bind(new InetSocketAddress(Config.port));
-
-
-                        // TO-DO Handle multiple packets by multiple clients
                         while (true) {
                             SocketAddress router = null;
-//                            ArrayList<Packet> responsePackets = new ArrayList<>();
-
-                            // Receive a packet within the timeout
-//                            channel.register(selector, OP_READ);
-//
-//                            selector.select();
-//                            Set<SelectionKey> keys = selector.selectedKeys();
-//                            System.out.println("Selector Keys Size:" + keys.size());
-//                            Iterator<SelectionKey> iterator = keys.iterator();
-//                            SelectionKey key = iterator.next();
 
                             while (flag) {
                                 System.out.println("Listening on Port " + Config.port);
@@ -92,33 +71,10 @@ public class Server {
 
                                 System.out.println("PACKET SEQ:" + responsePacket.getSequenceNumber());
 
-//                                if (responsePacket.getType() == 1) {
-//                                    if (!closingPackets.contains(responsePacket.getSequenceNumber())) {
-////                                        receivedPackets.clear();
-////                                        finalPacket = null;
-////                                        buf.clear();
-//                                        closingPackets.add(responsePacket.getSequenceNumber());
-//                                    } else
-//                                        continue;
-//                                }
-
-//                                if (!(responsePacket.getSequenceNumber() >= start - 1 && responsePacket.getSequenceNumber() <= start + 4)) {
-//                                    continue;
-//                                }
-
                                 // Add Client request packets
                                 if (!sequenceNumbers.contains(responsePacket.getSequenceNumber()) && responsePacket.getType() == 0) {
                                     System.out.println("Adding this packet");
 
-
-                                    // TO-DO Add ack resend - Drop and delay
-                                    // Send ACK for the received packet
-//                                    Packet packet = responsePacket.toBuilder()
-//                                            .setType(2)
-//                                            .setPayload(new byte[0])
-//                                            .create();
-//
-//                                    channel.send(packet.toBuffer(),router);
                                     modifyCurrentSequence(true);
 
                                     sendAck(responsePacket, channel, router);
@@ -135,7 +91,7 @@ public class Server {
                                     sequenceNumbers.add(responsePacket.getSequenceNumber());
                                 } else if (responsePacket.getType() == 0) {
                                     sendAck(responsePacket, channel, router);
-                                    System.out.println("Resensding ACK for Packet: " + responsePacket.getSequenceNumber());
+                                    System.out.println("Resending ACK for Packet: " + responsePacket.getSequenceNumber());
                                     continue;
                                 }
 
@@ -146,22 +102,9 @@ public class Server {
                                     break;
                                 }
 
-//                                responsePackets.add(responsePacket);
                                 System.out.println("Received Arraylist Size:" + receivedPackets.size());
-//                                System.out.println("Length:" + buf.limit());
-//                                }
-//                                // Wait for response
-//                                selector.select(5000);
-//
-//                                keys = selector.selectedKeys();
-//                                if (keys.isEmpty()) {
-//                                    System.out.println("No response after timeout");
-//                                    keys.clear();
-//                                    break;
-//                                }
                             }
 
-//                            channel.socket().setReuseAddress(true);
                             System.out.println("Starting channelHelper");
                             ChannelHelper channelHelper = new ChannelHelper(socketAddress, router, channel);
                             channelHelper.start();
@@ -176,8 +119,6 @@ public class Server {
                                 });
                             }
 
-//                            String response = "";
-
                             if (receivedPackets.size() == 0)
                                 continue;
 
@@ -185,9 +126,7 @@ public class Server {
                             Serve serve = new Serve(router, copy, channelHelper);
                             serve.start();
                             serve.join();
-//                            responsePackets.clear();
                             receivedPackets.clear();
-//                            sequenceNumbers.clear();
                             flag = true;
                             finalPacket = null;
                             buf.clear();
@@ -196,17 +135,6 @@ public class Server {
                     } catch (IOException ex) {
                         ex.printStackTrace();
                     }
-//                    ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
-//
-//                    serverSocketChannel.socket().bind(new InetSocketAddress(Config.port));
-//                    System.out.println("Listening on Port " + Config.port);
-//
-//                    while (true) {
-//                        socketChannel = serverSocketChannel.accept();
-//
-//                        Serve serve = new Serve(socketChannel);
-//                        serve.start();
-//                    }
                 } else {
                     System.out.println("Please enter a valid command.\n");
                 }
@@ -244,12 +172,6 @@ public class Server {
             channel.register(selector, OP_READ);
 
             Set<SelectionKey> keys = selector.selectedKeys();
-            System.out.println("Selector Keys Size:" + keys.size());
-
-//            Packet packet = new Packet.Builder()
-//                    .setType(1)
-//                    .setSequenceNumber(currentSequence)
-//                    .create();
 
             boolean flag = true;
 
@@ -260,7 +182,6 @@ public class Server {
                 selector.select(3000);
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();
                 Iterator<SelectionKey> iter = selectedKeys.iterator();
-//                SelectionKey key = iter.next();
 
                 // Receive Response
                 routerAddress = channel.receive(buf);
@@ -278,7 +199,6 @@ public class Server {
                     sendAck(receivedPacket, channel, routerAddress);
                     selector.close();
                     channel.socket().close();
-//                    key.cancel();
                     channel.close();
                     return receivedPacket;
                 } else if (receivedPacket.getType() == 1 && !sequenceNumbers.contains(receivedPacket.getSequenceNumber())) {
